@@ -1,0 +1,109 @@
+services:
+  # --- 1. Infrastructure Services ---
+  postgres:
+    image: postgres:15-alpine
+    container_name: quant_postgres
+    environment:
+      POSTGRES_USER: quant_user
+      POSTGRES_PASSWORD: quant_password
+      POSTGRES_DB: quant_fund_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quant_user -d quant_fund_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: quant_redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: quant_chromadb
+    ports:
+      - "8000:8000"
+    environment:
+      - IS_PERSISTENT=TRUE
+      - PERSIST_DIRECTORY=/chroma/chroma
+      - ANONYMIZED_TELEMETRY=FALSE
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v1/heartbeat')\" || exit 0"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+
+  # --- 2. Trading Engine Services ---
+  paper-trader:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quant_paper_trader
+    command: python3 -m services.execution.paper_trader
+    environment:
+      - PYTHONPATH=.
+      - POSTGRES_URL=postgresql://quant_user:quant_password@postgres:5432/quant_fund_db
+      - REDIS_URL=redis://redis:6379/0
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      chromadb:
+        condition: service_started
+    restart: unless-stopped
+
+  # --- 3. SaaS Multi-Tenant & Billing Service ---
+  saas-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quant_saas_gateway
+    command: python3 -m services.saas.auth_billing
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHONPATH=.
+      - POSTGRES_URL=postgresql://quant_user:quant_password@postgres:5432/quant_fund_db
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # --- 4. User Interface & XAI Dashboard ---
+  ui-dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: quant_ui_dashboard
+    command: python3 -m streamlit run ui/app.py --server.port=8501 --server.address=0.0.0.0
+    ports:
+      - "8501:8501"
+    environment:
+      - PYTHONPATH=.
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+    depends_on:
+      chromadb:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  chroma_data:

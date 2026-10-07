@@ -1,0 +1,28 @@
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Python Cache & Logs
+__pycache__/
+*.py[cod]
+*$py.class
+*.log
+
+# Environment & Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Databases & Local Storage
+*.db
+*.sqlite3
+chroma_db/
+postgres_data/
+redis_data/
+
+# OS & IDE Files
+.DS_Store
+.idea/
+.vscode/
